@@ -45,8 +45,15 @@ class TgBot:
 
         if content_type == 'text':
             self._on_chat_message_text(chat_id, msg)
+
         elif chat_type in ['supergroup', 'group'] and content_type == 'new_chat_member':
-            self._on_new_chat_member(chat_id, msg)
+            # if i am the one
+            if self._me['id'] == msg['new_chat_member']['id']:
+                return self._on_join_a_group(chat_id)
+
+            # an user joined
+            return self._on_new_chat_member(chat_id, msg)
+
         elif chat_type in ['supergroup', 'group'] and content_type == 'left_chat_member':
             self._on_left_chat_member(chat_id, msg)
 
@@ -69,11 +76,12 @@ class TgBot:
                 self.bot.sendMessage(chat_id, row)
                 time.sleep(len(row)/conf.chars_per_second)
 
-    def _on_new_chat_member(self, chat_id, msg):
-        if self._me['id'] == msg['new_chat_member']['id']:
-            self.bot.sendMessage(chat_id, 'hello everyone, i\'m a bot.')
-            return True
+    def _on_join_a_group(self, chat_id):
+        # I am a BOT
+        self.bot.sendMessage(chat_id, vn_data.replies.bot_here[self._lang])
+        return
 
+    def _on_new_chat_member(self, chat_id, msg):
         new_members = self._new_chat_members(chat_id=chat_id)
 
         latest_date_key = self._get_latest_new_chat_member_joined_date_cache_key(chat_id)
@@ -101,10 +109,12 @@ class TgBot:
 
         # refresh latest_date cache
         self._cache.set(latest_date_key, msg['date'])
+        return
 
     def _on_left_chat_member(self, chat_id, msg):
         # self.bot.deleteMessage((chat_id, msg['message_id']))
         pass
+        return None
 
     @staticmethod
     def _member2name(member):
