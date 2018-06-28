@@ -1,3 +1,8 @@
+# VISION
+t.py
+vn_data/conf.py
+vn_data/replies.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
