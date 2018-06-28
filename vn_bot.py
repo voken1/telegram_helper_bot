@@ -73,7 +73,7 @@ class TgBot:
         new_members = self._new_chat_members(chat_id=chat_id)
 
         latest_date_key = self._get_latest_new_chat_member_joined_date_cache_key(chat_id)
-        latest_date = int(self._cache.get(latest_date_key))
+        latest_date = self._cache.get(latest_date_key)
         if latest_date is None:
             latest_date = 0
 
