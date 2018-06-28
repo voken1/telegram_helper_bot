@@ -70,6 +70,10 @@ class TgBot:
                 time.sleep(len(row)/conf.chars_per_second)
 
     def _on_new_chat_member(self, chat_id, msg):
+        if self._me['id'] == msg['new_chat_member']['id']:
+            self.bot.sendMessage(chat_id, 'hello everyone, i\'m a bot.')
+            return True
+
         new_members = self._new_chat_members(chat_id=chat_id)
 
         latest_date_key = self._get_latest_new_chat_member_joined_date_cache_key(chat_id)
@@ -81,6 +85,11 @@ class TgBot:
         if (new_members
                 and conf.welcome_interval_seconds > msg['date'] - latest_date
                 and conf.seems_like_invited_by_a_robot_limit < len(new_members)):
+
+            # pend
+            self._new_chat_member_append(chat_id=chat_id, date=msg['date'], member=msg['new_chat_member'])
+
+            # erase the footprint
             self.bot.deleteMessage((chat_id, msg['message_id']))
 
         # or hello
@@ -90,9 +99,8 @@ class TgBot:
                 self.bot.sendMessage(chat_id, row)
                 time.sleep(len(row) / conf.chars_per_second)
 
-        # cached
+        # refresh latest_date cache
         self._cache.set(latest_date_key, msg['date'])
-        self._new_chat_member_append(chat_id=chat_id, date=msg['date'], member=msg['new_chat_member'])
 
     def _on_left_chat_member(self, chat_id, msg):
         # self.bot.deleteMessage((chat_id, msg['message_id']))
