@@ -72,9 +72,7 @@ class TgBot:
         # match replies
         replies = vn_match.get_matched_replies(msg['text'], self._lang)
         if replies:
-            for row in replies:
-                self.bot.sendMessage(chat_id, row)
-                time.sleep(len(row)/conf.chars_per_second)
+            self._batch_send_messages(chat_id, replies)
 
     def _on_join_a_group(self, chat_id):
         # I am a BOT
@@ -103,9 +101,7 @@ class TgBot:
         # or hello
         else:
             self.bot.sendMessage(chat_id, vn_data.replies.hello[self.lang] % self._member2name(msg['new_chat_member']))
-            for row in vn_data.replies.summaries[self.lang]:
-                self.bot.sendMessage(chat_id, row)
-                time.sleep(len(row) / conf.chars_per_second)
+            self._batch_send_messages(chat_id, vn_data.replies.summaries[self.lang])
 
         # refresh latest_date cache
         self._cache.set(latest_date_key, msg['date'])
@@ -115,6 +111,11 @@ class TgBot:
         # self.bot.deleteMessage((chat_id, msg['message_id']))
         pass
         return None
+
+    def _batch_send_messages(self, chat_id, messages):
+        for row in messages:
+            self.bot.sendMessage(chat_id, row)
+            time.sleep(len(row) / conf.chars_per_second)
 
     @staticmethod
     def _member2name(member):
