@@ -72,11 +72,11 @@ class TgBot:
         # match replies
         replies = vn_match.get_matched_replies(msg['text'], self._lang)
         if replies:
-            self._batch_send_messages(chat_id, replies)
+            self._send_messages(chat_id, replies)
 
     def _on_join_a_group(self, chat_id):
         # I am a BOT
-        self.bot.sendMessage(chat_id, vn_data.replies.bot_here[self._lang])
+        self._send_messages(chat_id, vn_data.replies.bot_here[self._lang])
         return
 
     def _on_new_chat_member(self, chat_id, msg):
@@ -101,7 +101,7 @@ class TgBot:
         # or hello
         else:
             self.bot.sendMessage(chat_id, vn_data.replies.hello[self.lang] % self._member2name(msg['new_chat_member']))
-            self._batch_send_messages(chat_id, vn_data.replies.summaries[self.lang])
+            self._send_messages(chat_id, vn_data.replies.summaries[self.lang])
 
         # refresh latest_date cache
         self._cache.set(latest_date_key, msg['date'])
@@ -112,10 +112,15 @@ class TgBot:
         pass
         return None
 
-    def _batch_send_messages(self, chat_id, messages):
+    def _send_messages(self, chat_id, messages):
         for row in messages:
-            self.bot.sendMessage(chat_id, row)
-            time.sleep(len(row) / conf.chars_per_second)
+            if isinstance(row, str):
+                self.bot.sendMessage(chat_id, row)
+                time.sleep(len(row) / conf.chars_per_second)
+            elif isinstance(row, dict):
+                self.bot.sendMessage(chat_id, 'dict...')
+            elif isinstance(row, list):
+                self._send_messages(chat_id, row)
 
     @staticmethod
     def _member2name(member):
