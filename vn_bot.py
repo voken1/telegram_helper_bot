@@ -153,17 +153,18 @@ class TgBot:
         # welcome
         if msg['text'] in ['w', 'welcome']:
             self.bot.deleteMessage((chat.tg_id, msg['message_id']))
-            self._welcome(chat)
+            self._hello(chat)
 
         # vision summary
         elif msg['text'] in ['s', 'summary']:
             self.bot.deleteMessage((chat.tg_id, msg['message_id']))
-            self._summary(chat)
+            self._send_messages(chat, vn_data.replies.summaries[self.lang])
 
         # save message text
         message = Message.create(
             member_id=member.id,
             chat_id=chat.id,
+            chat_message_id=msg['message_id'],
             text=msg['text'],
             sent_=msg['date'],
         )
@@ -187,20 +188,15 @@ class TgBot:
             time_=msg['date'],
         )
 
-        # nearly & seems like invited by a robot ? pend and erase the footprint
-        doorbells = Doorbell.select().where(Doorbell.joined == True)
-
-        if (doorbells.count() > 2
-                and conf.welcome_interval_seconds > msg['date'] - doorbells[-2].time_
-                and conf.seems_like_invited_by_a_robot_limit < doorbells.count()):
+        # If there are too many doorbells in a short time, erase the footprint.
+        doorbells = Doorbell.select().where((Doorbell.chat == chat) & (Doorbell.joined == True))
+        if (doorbells.count() > 2 and conf.doorbells_batch_limit_period > msg['date'] - doorbells[-2].time_
+                and doorbells.count() > conf.doorbells_batch_limit):
             self.bot.deleteMessage((chat.tg_id, msg['message_id']))
 
-        # or hello
+        # or say hello
         else:
-            doorbell.greeted = True
-            doorbell.save()
-            self.bot.sendMessage(chat.tg_id, vn_data.replies.hello[self.lang] % member.call_name)
-            self._send_messages(chat, vn_data.replies.summaries[self.lang])
+            self._hello(chat)
 
         return
 
@@ -213,7 +209,7 @@ class TgBot:
             time_=msg['date'],
         )
 
-        # erase
+        # erase footprint.
         self.bot.deleteMessage((chat.tg_id, msg['message_id']))
         return
 
@@ -227,10 +223,13 @@ class TgBot:
             elif isinstance(row, list):
                 self._send_messages(chat, row)
 
-    def _welcome(self, chat):
-        doorbells = Doorbell.select().where((Doorbell.joined == True) & (Doorbell.greeted == False))
+    def _hello(self, chat):
+        doorbells = Doorbell.select().where(
+            (Doorbell.chat == chat)
+            & (Doorbell.joined == True)
+            & (Doorbell.greeted == False))
 
-        if doorbells.count() and doorbells.count() < conf.many_new_chat_members_limit:
+        if doorbells.count() < conf.hello_mentioned_limit:
             names = []
             for doorbell in doorbells:
                 names.append(doorbell.member.call_name)
@@ -240,11 +239,5 @@ class TgBot:
         else:
             self.bot.sendMessage(chat.tg_id, vn_data.replies.hello2all[self.lang])
 
-        # vision summary
-        self._summary(chat)
-
-    def _summary(self, chat):
-        for row in vn_data.replies.summaries[self.lang]:
-            self.bot.sendMessage(chat.tg_id, row)
-            time.sleep(len(row) / conf.chars_per_second)
-
+        # summaries
+        self._send_messages(chat, vn_data.replies.summaries[self.lang])

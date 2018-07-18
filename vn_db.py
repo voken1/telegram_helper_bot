@@ -42,6 +42,7 @@ class Chat(BaseModel):
 class Message(BaseModel):
     member = ForeignKeyField(Member)
     chat = ForeignKeyField(Chat, null=True)
+    chat_message_id = IntegerField()
     text = TextField()
     sent_ = IntegerField(default=int(time.time()))
 
