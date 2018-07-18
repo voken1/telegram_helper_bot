@@ -4,18 +4,19 @@ import telepot
 import vn_match
 import vn_data.replies
 from vn_data import conf
-from vn_cache import Cache
+from vn_db import *
 from pprint import pprint
 from telepot.loop import MessageLoop
 
 
 class TgBot:
     def __init__(self, token, lang='en'):
-        self._cache = Cache()
         self._token = token
         self._lang = lang
         self._bot = telepot.Bot(self._token)
         self._me = self.bot.getMe()
+        self._chat = None
+        self._member = None
         self.prt()
         self.message_loop()
 
@@ -38,194 +39,212 @@ class TgBot:
         MessageLoop(self.bot, self.on_message).run_as_thread(relax=conf.bot_relax)
 
     def on_message(self, msg):
+        chat = self._save_chat(msg['chat'], msg['date'])
+        member = self._save_member(msg['from'], msg['date'])
+
         content_type, chat_type, chat_id = telepot.glance(msg)
 
         print('\n\n--- [ %s ] ---\n' % content_type, chat_type, chat_id)
         pprint(msg)
 
         if content_type == 'text':
-            self._on_chat_message_text(chat_id, msg)
+            self._on_chat_message_text(chat, member, msg)
 
         elif chat_type in ['supergroup', 'group'] and content_type == 'new_chat_member':
             # if i am the one
             if self._me['id'] == msg['new_chat_member']['id']:
-                return self._on_join_a_group(chat_id)
+                return self._on_join_a_group(chat)
 
             # an user joined
-            return self._on_new_chat_member(chat_id, msg)
+            return self._on_new_chat_member(chat, msg)
 
         elif chat_type in ['supergroup', 'group'] and content_type == 'left_chat_member':
-            self._on_left_chat_member(chat_id, msg)
+            self._on_left_chat_member(chat, msg)
 
-    def _on_chat_message_text(self, chat_id, msg):
+    def _save_chat(self, c, d):
+        chat_dict = self._get_defaults_dict(
+                source=c,
+                keys={
+                    'title': 'title',
+                    'username': 'title',
+                },
+                existing={
+                    'type': c['type'],
+                    'updated_':d,
+                },
+            )
+
+        # chat get_or_create
+        chat, created = Chat.get_or_create(
+            tg_id=c['id'],
+            defaults=chat_dict,
+        )
+
+        # update
+        need_update = False
+        if chat.type != chat_dict.get('type'):
+            chat.type = chat_dict.get('type')
+            need_update = True
+        if chat.title != chat_dict.get('title'):
+            chat.title = chat_dict.get('title')
+            need_update = True
+        if need_update:
+            chat.updated_ = d
+            chat.save()
+
+        # return
+        return chat
+
+    def _save_member(self, m, d):
+        member_dict = self._get_defaults_dict(
+            source=m,
+            keys={
+                'username': 'username',
+                'is_bot': 'is_bot',
+                'first_name': 'first_name',
+                'last_name': 'last_name',
+            },
+            existing={
+                'updated_': d,
+            },
+        )
+
+        # member get_or_create
+        member, created = Member.get_or_create(
+            tg_id=m['id'],
+            defaults=member_dict,
+        )
+
+        # update
+        need_update = False
+        if member.username != member_dict.get('username'):
+            member.username = member_dict.get('username')
+            need_update = True
+        if member.first_name != member_dict.get('first_name'):
+            member.first_name = member_dict.get('first_name')
+            need_update = True
+        if member.last_name != member_dict.get('last_name'):
+            member.last_name = member_dict.get('last_name')
+            need_update = True
+        if need_update:
+            member.updated_ = d
+            member.save()
+
+        # return
+        return member
+
+    @staticmethod
+    def _get_defaults_dict(source, keys, existing=None):
+        # existing
+        if existing is None:
+            result = {}
+        else:
+            result = existing
+
+        # keys
+        for i in keys:
+            if i in source.keys():
+                result[keys[i]] = source[i]
+
+        # return
+        return result
+
+    def _on_chat_message_text(self, chat, member, msg):
         # welcome
-        if msg['text'] in ['w']:
-            self._welcome(chat_id)
+        if msg['text'] in ['w', 'welcome']:
+            self.bot.deleteMessage((chat.tg_id, msg['message_id']))
+            self._welcome(chat)
 
         # vision summary
-        elif msg['text'] in ['vn', 'vision']:
-            self._summary(chat_id)
+        elif msg['text'] in ['s', 'summary']:
+            self.bot.deleteMessage((chat.tg_id, msg['message_id']))
+            self._summary(chat)
 
-        elif 'del' in msg['text']:
-            self.bot.deleteMessage((chat_id, msg['message_id']))
+        # save message text
+        message = Message.create(
+            member_id=member.id,
+            chat_id=chat.id,
+            text=msg['text'],
+            sent_=msg['date'],
+        )
 
         # match replies
         replies = vn_match.get_matched_replies(msg['text'], self._lang)
         if replies:
-            self._send_messages(chat_id, replies)
+            self._send_messages(chat, replies)
 
-    def _on_join_a_group(self, chat_id):
+    def _on_join_a_group(self, chat):
         # I am a BOT
-        self._send_messages(chat_id, vn_data.replies.bot_here[self._lang])
+        self._send_messages(chat, vn_data.replies.bot_here[self._lang])
         return
 
-    def _on_new_chat_member(self, chat_id, msg):
-        new_members = self._new_chat_members(chat_id=chat_id)
-
-        latest_date_key = self._get_latest_new_chat_member_joined_date_cache_key(chat_id)
-        latest_date = self._cache.get(latest_date_key)
-        if latest_date is None:
-            latest_date = 0
+    def _on_new_chat_member(self, chat, msg):
+        member = self._save_member(msg['new_chat_member'], msg['date'])
+        doorbell = Doorbell.create(
+            chat_id=chat.id,
+            member_id=member.id,
+            joined=True,
+            time_=msg['date'],
+        )
 
         # nearly & seems like invited by a robot ? pend and erase the footprint
-        if (new_members
-                and conf.welcome_interval_seconds > msg['date'] - latest_date
-                and conf.seems_like_invited_by_a_robot_limit < len(new_members)):
+        doorbells = Doorbell.select().where(Doorbell.joined == True)
 
-            # pend
-            self._new_chat_member_append(chat_id=chat_id, date=msg['date'], member=msg['new_chat_member'])
-
-            # erase the footprint
-            self.bot.deleteMessage((chat_id, msg['message_id']))
+        if (doorbells.count() > 2
+                and conf.welcome_interval_seconds > msg['date'] - doorbells[-2].time_
+                and conf.seems_like_invited_by_a_robot_limit < doorbells.count()):
+            self.bot.deleteMessage((chat.tg_id, msg['message_id']))
 
         # or hello
         else:
-            self.bot.sendMessage(chat_id, vn_data.replies.hello[self.lang] % self._member2name(msg['new_chat_member']))
-            self._send_messages(chat_id, vn_data.replies.summaries[self.lang])
+            doorbell.greeted = True
+            doorbell.save()
+            self.bot.sendMessage(chat.tg_id, vn_data.replies.hello[self.lang] % member.call_name)
+            self._send_messages(chat, vn_data.replies.summaries[self.lang])
 
-        # refresh latest_date cache
-        self._cache.set(latest_date_key, msg['date'])
         return
 
-    def _on_left_chat_member(self, chat_id, msg):
-        # self.bot.deleteMessage((chat_id, msg['message_id']))
-        pass
-        return None
+    def _on_left_chat_member(self, chat, msg):
+        member = self._save_member(msg['left_chat_member'], msg['date'])
+        doorbell = Doorbell.create(
+            chat_id=chat.id,
+            member_id=member.id,
+            joined=False,
+            time_=msg['date'],
+        )
 
-    def _send_messages(self, chat_id, messages):
+        # erase
+        self.bot.deleteMessage((chat.tg_id, msg['message_id']))
+        return
+
+    def _send_messages(self, chat, messages):
         for row in messages:
             if isinstance(row, str):
-                self.bot.sendMessage(chat_id, row)
+                self.bot.sendMessage(chat.tg_id, row)
                 time.sleep(len(row) / conf.chars_per_second)
             elif isinstance(row, dict):
-                self.bot.sendMessage(chat_id, 'dict...')
+                self.bot.sendMessage(chat.tg_id, 'dict...')
             elif isinstance(row, list):
-                self._send_messages(chat_id, row)
+                self._send_messages(chat, row)
 
-    @staticmethod
-    def _member2name(member):
-        if 'username' in member:
-            return '@%s' % member['username']
+    def _welcome(self, chat):
+        doorbells = Doorbell.select().where((Doorbell.joined == True) & (Doorbell.greeted == False))
 
-        name = []
-
-        if 'first_name' in member:
-            name.append(member['first_name'])
-
-        if 'last_name' in member:
-            name.append(member['last_name'])
-
-        return ' '.join(name)
-
-    def _get_new_chat_members_cache_key(self, chat_id):
-        return 'bot%d_chat%d_new_chat_members' % (self._me['id'], chat_id)
-
-    def _get_latest_new_chat_member_joined_date_cache_key(self, chat_id):
-        key = 'bot%d_chat%d_latest_new_chat_member_joined_date' % (self._me['id'], chat_id)
-        return key
-
-    def _new_chat_members(self, chat_id):
-        new_members = self._cache.get(self._get_new_chat_members_cache_key(chat_id))
-        if new_members is None:
-            new_members = []
-
-        return new_members
-
-    def _in_new_chat_members(self, member_id, chat_id):
-        new_members = self._new_chat_members(chat_id=chat_id)
-
-        for row in new_members:
-            if row['member']['id'] == member_id:
-                return True
-        return False
-
-    def _new_chat_member_find(self, chat_id, member_id):
-        new_members = self._new_chat_members(chat_id=chat_id)
-
-        for row in new_members:
-            if row['member']['id'] == member_id:
-                return row
-        return False
-
-    def _new_chat_member_append(self, chat_id, date, member):
-        new_members = self._new_chat_members(chat_id=chat_id)
-
-        # add if new
-        if not self._in_new_chat_members(member['id'], chat_id):
-            new_members.append({
-                'date': date,
-                'member': member,
-            })
-            self._cache.set(self._get_new_chat_members_cache_key(chat_id), new_members)
-
-        # return list
-        return new_members
-
-    def _new_chat_member_remove(self, chat_id, member_ids):
-        new_members = self._new_chat_members(chat_id=chat_id)
-
-        for row in new_members:
-            if row['member']['id'] in member_ids:
-                new_members.remove(row)
-
-        self._cache.set(self._get_new_chat_members_cache_key(chat_id), new_members)
-
-        return new_members
-
-    def _new_chat_members_before(self, chat_id, date):
-        members = []
-        for member in self._new_chat_members(chat_id):
-            if member['date'] <= date:
-                members.append(member)
-        return members
-
-    def _new_chat_members_after(self, chat_id, date):
-        members = []
-        for member in self._new_chat_members(chat_id):
-            if member['date'] >= date:
-                members.append(member)
-        return members
-
-    def _welcome(self, chat_id):
-        new_members = self._new_chat_members(chat_id)
-
-        # say hello to every new members if not too many
-        if new_members and len(new_members) < conf.many_new_chat_members_limit:
+        if doorbells.count() and doorbells.count() < conf.many_new_chat_members_limit:
             names = []
-            for rows in new_members:
-                names.append(self._member2name(rows['member']))
-            self.bot.sendMessage(chat_id, vn_data.replies.hello[self.lang] % '\n'.join(names))
+            for doorbell in doorbells:
+                names.append(doorbell.member.call_name)
+                doorbell.greeted = True
+                doorbell.save()
+            self.bot.sendMessage(chat.tg_id, vn_data.replies.hello[self.lang] % '\n'.join(names))
         else:
-            self.bot.sendMessage(chat_id, vn_data.replies.hello2all[self.lang])
-
-        # empty new_members pool
-        self._cache.set(self._get_new_chat_members_cache_key(chat_id), [])
+            self.bot.sendMessage(chat.tg_id, vn_data.replies.hello2all[self.lang])
 
         # vision summary
-        self._summary(chat_id)
+        self._summary(chat)
 
-    def _summary(self, chat_id):
+    def _summary(self, chat):
         for row in vn_data.replies.summaries[self.lang]:
-            self.bot.sendMessage(chat_id, row)
+            self.bot.sendMessage(chat.tg_id, row)
             time.sleep(len(row) / conf.chars_per_second)
 

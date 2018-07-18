@@ -1,5 +1,6 @@
 # VISION
 .idea/
+*.db
 t.py
 vn_data/conf.py
 vn_data/replies.py
